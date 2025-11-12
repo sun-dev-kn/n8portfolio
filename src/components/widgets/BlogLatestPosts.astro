@@ -28,12 +28,113 @@ const {
   bg = await Astro.slots.render('bg'),
 } = Astro.props;
 
-const normalizedItems = items.map((item) => {
-  const images = item.images?.length ? item.images : [item.coverImage].filter(Boolean);
+const slugify = (value) => {
+  if (!value) {
+    return '';
+  }
+  return String(value)
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+};
+
+const slugCounts = new Map();
+
+const normalizedItems = items.map((item, index) => {
+  const fallbackTitle = item.title ?? `Project ${index + 1}`;
+  const fallbackDescription = item.description ?? '';
+
+  const normalizeImage = (image, imageIndex) => {
+    if (!image) {
+      return null;
+    }
+
+    if (typeof image === 'string') {
+      const derivedName = `${fallbackTitle} visual ${imageIndex + 1}`;
+      return {
+        name: derivedName,
+        src: image,
+        alt: derivedName,
+        context: fallbackDescription,
+      };
+    }
+
+    if (typeof image === 'object' && image !== null) {
+      const derivedName = image.name && image.name.trim().length > 0 ? image.name : `${fallbackTitle} visual ${imageIndex + 1}`;
+      const derivedAlt =
+        image.alt && image.alt.trim().length > 0 ? image.alt : `${derivedName} (${fallbackTitle})`;
+      const derivedContext =
+        image.context && image.context.trim().length > 0
+          ? image.context
+          : fallbackDescription || `${fallbackTitle} insight`;
+
+      if (typeof image.src === 'string' && image.src.trim().length > 0) {
+        return {
+          name: derivedName,
+          src: image.src,
+          alt: derivedAlt,
+          context: derivedContext,
+        };
+      }
+    }
+
+    return null;
+  };
+
+  const normalizedImages = Array.isArray(item.images)
+    ? item.images
+        .map((image, imageIndex) => normalizeImage(image, imageIndex))
+        .filter(
+          (image) =>
+            image &&
+            typeof image.src === 'string' &&
+            image.src.trim().length > 0
+        )
+        .map((image) => ({
+          ...image,
+          src: image.src.trim(),
+        }))
+    : [];
+
+  const images =
+    normalizedImages.length > 0
+      ? normalizedImages
+      : item.coverImage
+        ? [
+            {
+              name: `${fallbackTitle} visual`,
+              src: item.coverImage,
+              alt: `${fallbackTitle} visual`,
+              context: fallbackDescription,
+            },
+          ]
+        : [];
+
+  const rawSlug =
+    (typeof item.slug === 'string' && item.slug.trim()) ||
+    (typeof item.link === 'string' && item.link.trim() && item.link.trim() !== '#'
+      ? item.link.replace(/^#/, '').trim()
+      : slugify(`${item.title ?? 'project'}-${index + 1}`));
+
+  let slug = slugify(rawSlug);
+  if (!slug) {
+    slug = `project-${index + 1}`;
+  }
+
+  const slugCount = slugCounts.get(slug) ?? 0;
+  slugCounts.set(slug, slugCount + 1);
+  if (slugCount > 0) {
+    slug = `${slug}-${slugCount + 1}`;
+  }
 
   return {
     ...item,
+    coverImage: item.coverImage ?? images[0]?.src ?? '',
     images,
+    slug,
   };
 });
 
@@ -53,29 +154,40 @@ const galleryDataElementId = `${galleryContextId}-data`;
                 class="text-3xl font-bold tracking-tight sm:text-4xl sm:leading-none group font-heading mb-2"
                 set:html={title}
               />
-              {linkText && linkUrl && (
-                <Button variant="link" href={linkUrl}>
-                  {linkText} »
-                </Button>
-              )}
             </div>
           )}
 
           {information && <p class="text-muted dark:text-slate-400 lg:text-sm lg:max-w-md" set:html={information} />}
         </div>
 
-        <div class="grid gap-8 md:grid-cols-2 xl:grid-cols-4 xl:gap-10">
+        <div class="grid gap-8 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-2 xl:gap-10">
           {normalizedItems.map((project, index) => (
             <article
-              class={`group relative flex h-full flex-col overflow-hidden rounded-3xl border border-slate-200/50 bg-white/95 shadow-xl transition duration-300 ease-out hover:-translate-y-1 hover:shadow-2xl dark:border-slate-700/50 dark:bg-slate-900/70 dark:shadow-slate-900/40 ${
-                project.featured ? 'xl:col-span-2' : ''
-              }`}
+              id={project.slug ?? undefined}
+              class="group relative flex flex-col overflow-hidden rounded-3xl border border-slate-200/50 bg-white/95 shadow-xl transition duration-300 ease-out hover:-translate-y-1 hover:shadow-2xl dark:border-slate-700/50 dark:bg-slate-900/70 dark:shadow-slate-900/40"
               data-gallery-card
               data-gallery-project={index}
+              data-gallery-slug={project.slug ?? undefined}
               role="button"
               tabindex="0"
               aria-label={`Open ${project.title} gallery`}
             >
+              {project.slug && (
+                <button
+                  type="button"
+                  class="gallery-copy-link"
+                  data-gallery-copy
+                  data-gallery-slug={project.slug}
+                  aria-label={`Copy link to ${project.title}`}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M9.17 7.17a4 4 0 0 1 5.66 0l2 2a4 4 0 0 1 0 5.66l-1.42 1.42a1 1 0 0 1-1.42-1.42l1.42-1.42a2 2 0 0 0 0-2.83l-2-2a2 2 0 0 0-2.83 0l-1.42 1.42a1 1 0 1 1-1.42-1.42l1.42-1.42Zm-4 4 1.42-1.42a1 1 0 1 1 1.42 1.42L7 12.17a2 2 0 0 0 0 2.83l2 2a2 2 0 0 0 2.83 0l1.42-1.42a1 1 0 1 1 1.42 1.42l-1.42 1.42a4 4 0 0 1-5.66 0l-2-2a4 4 0 0 1 0-5.66Z"
+                    />
+                  </svg>
+                  <span class="gallery-copy-link__status" aria-hidden="true">Copied</span>
+                </button>
+              )}
               <button
                 type="button"
                 class="relative block aspect-[16/10] w-full overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900"
@@ -90,8 +202,8 @@ const galleryDataElementId = `${galleryContextId}-data`;
                 )}
 
                 <img
-                  src={project.images[0] ?? project.coverImage}
-                  alt={project.title}
+                  src={project.images?.[0]?.src ?? project.coverImage}
+                  alt={project.images?.[0]?.alt ?? project.title}
                   loading="lazy"
                   class="h-full w-full object-cover transition duration-500 ease-out group-hover:scale-[1.03] group-hover:saturate-110"
                 />
@@ -102,40 +214,59 @@ const galleryDataElementId = `${galleryContextId}-data`;
                 </div>
               </button>
 
-              <div class="flex h-full flex-col gap-4 px-7 py-8">
+              <div class="flex flex-col gap-4 px-6 py-6">
                 <div class="flex flex-col gap-2">
                   <h3 class="text-xl font-semibold text-slate-900 dark:text-slate-100">{project.title}</h3>
                   <p class="text-base text-slate-600 dark:text-slate-400">{project.description}</p>
                 </div>
 
+                {project.keywords?.length ? (
+                  <ul class="flex flex-wrap gap-2 text-[0.7rem] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-300">
+                    {project.keywords.map((item) => (
+                      <li class="rounded-full border border-slate-200/60 bg-white/70 px-3 py-1 text-slate-600 shadow-sm dark:border-slate-700/60 dark:bg-slate-800/70 dark:text-slate-200">
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+
+                {(project.investment || project.impact || project.advantage) && (
+                  <div class="grid gap-1 text-sm text-slate-500 dark:text-slate-400">
+                    {project.investment && (
+                      <p>
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Investment:</span>{' '}
+                        {project.investment}
+                      </p>
+                    )}
+                    {project.impact && (
+                      <p>
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Impact:</span> {project.impact}
+                      </p>
+                    )}
+                    {project.advantage && (
+                      <p>
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Advantage:</span>{' '}
+                        {project.advantage}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {project.outcomes?.length ? (
+                  <ul class="list-disc space-y-1 pl-5 text-sm text-slate-600 dark:text-slate-300">
+                    {project.outcomes.slice(0, 2).map((item) => (
+                      <li>{item}</li>
+                    ))}
+                  </ul>
+                ) : null}
+
                 {project.tech?.length ? (
-                  <ul class="flex flex-wrap gap-2 text-sm font-medium text-primary">
+                  <ul class="flex flex-wrap gap-2 text-sm font-medium text-primary flex-flow-wrap">
                     {project.tech.map((item) => (
                       <li class="rounded-full bg-primary/10 px-3 py-1 text-sm text-primary">{item}</li>
                     ))}
                   </ul>
                 ) : null}
-
-                <div class="mt-auto flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    class="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900"
-                    data-gallery-trigger
-                    data-gallery-project={index}
-                    aria-label={`Preview ${project.title} full screen`}
-                  >
-                    Preview full screen
-                  </button>
-
-                  {project.link ? (
-                    <a
-                      href={project.link}
-                      class="inline-flex items-center justify-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-semibold text-primary transition hover:-translate-y-0.5 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-slate-900"
-                    >
-                      Case study
-                    </a>
-                  ) : null}
-                </div>
               </div>
             </article>
           ))}
@@ -146,19 +277,39 @@ const galleryDataElementId = `${galleryContextId}-data`;
             <button type="button" class="lightbox-close" data-gallery-close aria-label="Close gallery">
               ×
             </button>
-            <div class="lightbox-nav">
-              <button type="button" class="lightbox-arrow" data-gallery-prev aria-label="Previous screenshot">
-                ‹
-              </button>
-              <button type="button" class="lightbox-arrow" data-gallery-next aria-label="Next screenshot">
-                ›
-              </button>
-            </div>
 
             <figure class="lightbox-layout">
               <div class="lightbox-media">
-                <div class="lightbox-image">
+                <div class="lightbox-image" data-gallery-image-wrapper>
                   <img src="" alt="" data-gallery-image />
+                  <div class="lightbox-toolkit" data-gallery-toolkit>
+                    <button type="button" class="lightbox-toolkit__button" data-gallery-zoom-out aria-label="Zoom out">
+                      <span aria-hidden="true">−</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="lightbox-toolkit__button lightbox-toolkit__button--fit"
+                      data-gallery-zoom-reset
+                      aria-label="Reset zoom to fit"
+                    >
+                      Fit
+                    </button>
+                    <button type="button" class="lightbox-toolkit__button" data-gallery-zoom-in aria-label="Zoom in">
+                      <span aria-hidden="true">+</span>
+                    </button>
+                  </div>
+                  <div class="lightbox-nav">
+                    <button type="button" class="lightbox-arrow" data-gallery-prev aria-label="Previous screenshot">
+                      ‹
+                    </button>
+                    <button type="button" class="lightbox-arrow" data-gallery-next aria-label="Next screenshot">
+                      ›
+                    </button>
+                  </div>
+                </div>
+                <div class="lightbox-image-caption">
+                  <p class="lightbox-image-caption__name" data-gallery-image-name></p>
+                  <p class="lightbox-image-caption__context" data-gallery-image-context></p>
                 </div>
                 <div class="lightbox-thumbs" data-gallery-thumbs role="list"></div>
               </div>
@@ -167,9 +318,48 @@ const galleryDataElementId = `${galleryContextId}-data`;
                   <h3 data-gallery-title></h3>
                   <p data-gallery-description></p>
                 </div>
+                <div class="lightbox-meta lightbox-meta--stack">
+                  <div class="lightbox-meta-block" data-gallery-investment hidden></div>
+                  <div class="lightbox-meta-block" data-gallery-impact hidden></div>
+                  <div class="lightbox-meta-block" data-gallery-advantage hidden></div>
+                </div>
                 <div class="lightbox-meta">
                   <span>Toolkit:</span>
                   <ul data-gallery-tech></ul>
+                </div>
+                <div class="lightbox-meta lightbox-meta--text" data-gallery-infrastructure-wrapper hidden>
+                  <span>Infrastructure:</span>
+                  <p data-gallery-infrastructure></p>
+                </div>
+                <div class="lightbox-meta lightbox-meta--text" data-gallery-training-wrapper hidden>
+                  <span>Training:</span>
+                  <p data-gallery-training></p>
+                </div>
+                <div class="lightbox-story-grid" data-gallery-story hidden>
+                  <div class="lightbox-story-block">
+                    <h4>Problem</h4>
+                    <p data-gallery-problem></p>
+                  </div>
+                  <div class="lightbox-story-block">
+                    <h4>Issues We Faced</h4>
+                    <ul data-gallery-issues></ul>
+                  </div>
+                  <div class="lightbox-story-block">
+                    <h4>Solution</h4>
+                    <p data-gallery-solution></p>
+                  </div>
+                  <div class="lightbox-story-block">
+                    <h4>Outcomes</h4>
+                    <ul data-gallery-outcomes></ul>
+                  </div>
+                </div>
+                <div class="lightbox-meta lightbox-meta--text" data-gallery-role hidden>
+                  <span>Role:</span>
+                  <p data-gallery-role-text></p>
+                </div>
+                <div class="lightbox-meta lightbox-meta--text" data-gallery-timeline hidden>
+                  <span>Timeline:</span>
+                  <p data-gallery-timeline-text></p>
                 </div>
               </figcaption>
             </figure>
@@ -204,41 +394,332 @@ const galleryDataElementId = `${galleryContextId}-data`;
         return;
       }
 
-      const overlay = root.querySelector(`[data-gallery-overlay="${galleryContextId}"]`);
+      const normalizeSlugValue = (value) => {
+        if (typeof value !== 'string') {
+          return '';
+        }
+        return value.replace(/^#/, '').trim().toLowerCase();
+      };
+
+      const slugIndexMap = new Map();
+      projects.forEach((project, index) => {
+        const candidate =
+          normalizeSlugValue(project?.slug) ||
+          normalizeSlugValue(typeof project?.link === 'string' ? project.link : '');
+        if (candidate && !slugIndexMap.has(candidate)) {
+          slugIndexMap.set(candidate, index);
+        }
+      });
+
+      const baseHash = window.location.hash;
+      let activeSlug = null;
+      let suppressHashHandling = false;
+
+      const buildUrl = (hash) => `${window.location.pathname}${window.location.search}${hash ?? ''}`;
+
+      const setActiveHash = (slug) => {
+        if (!slug) {
+          return;
+        }
+        const hashValue = `#${slug}`;
+        activeSlug = slug;
+        if (window.location.hash === hashValue) {
+          return;
+        }
+        suppressHashHandling = true;
+        window.history.replaceState(null, '', buildUrl(hashValue));
+        setTimeout(() => {
+          suppressHashHandling = false;
+        }, 0);
+      };
+
+      const restoreBaseHash = () => {
+        suppressHashHandling = true;
+        if (baseHash && baseHash !== `#${activeSlug}`) {
+          window.history.replaceState(null, '', buildUrl(baseHash));
+        } else if (!baseHash) {
+          window.history.replaceState(null, '', buildUrl(''));
+        }
+        setTimeout(() => {
+          suppressHashHandling = false;
+        }, 0);
+        activeSlug = null;
+      };
+
+      let overlay =
+        root.querySelector(`[data-gallery-overlay="${galleryContextId}"]`) ??
+        document.querySelector(`[data-gallery-overlay="${galleryContextId}"]`);
       if (!(overlay instanceof HTMLElement)) {
         return;
+      }
+
+      if (overlay.dataset.galleryPortaled !== 'true') {
+        overlay.dataset.galleryPortaled = 'true';
+
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.right = '0';
+        overlay.style.bottom = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100vw';
+        overlay.style.maxWidth = 'none';
+        overlay.style.height = '100dvh';
+        overlay.style.minHeight = '100vh';
+        overlay.style.margin = '0';
+
+        const cleanupOverlay = () => {
+          overlay.remove();
+          document.removeEventListener('astro:before-swap', cleanupOverlay);
+          window.removeEventListener('hashchange', handleHashChange);
+        };
+
+        document.addEventListener('astro:before-swap', cleanupOverlay, { once: true });
+
+        if (document.body) {
+          document.body.appendChild(overlay);
+        }
       }
 
       const closeButton = overlay.querySelector('[data-gallery-close]');
       const nextButton = overlay.querySelector('[data-gallery-next]');
       const prevButton = overlay.querySelector('[data-gallery-prev]');
+      const imageWrapper = overlay.querySelector('[data-gallery-image-wrapper]');
       const imageEl = overlay.querySelector('[data-gallery-image]');
       const titleEl = overlay.querySelector('[data-gallery-title]');
       const descriptionEl = overlay.querySelector('[data-gallery-description]');
+      const investmentEl = overlay.querySelector('[data-gallery-investment]');
+      const impactEl = overlay.querySelector('[data-gallery-impact]');
+      const advantageEl = overlay.querySelector('[data-gallery-advantage]');
+      const infrastructureWrapper = overlay.querySelector('[data-gallery-infrastructure-wrapper]');
+      const infrastructureText = overlay.querySelector('[data-gallery-infrastructure]');
+      const trainingWrapper = overlay.querySelector('[data-gallery-training-wrapper]');
+      const trainingText = overlay.querySelector('[data-gallery-training]');
+      const storyGrid = overlay.querySelector('[data-gallery-story]');
+      const problemEl = overlay.querySelector('[data-gallery-problem]');
+      const issuesList = overlay.querySelector('[data-gallery-issues]');
+      const solutionEl = overlay.querySelector('[data-gallery-solution]');
+      const outcomesList = overlay.querySelector('[data-gallery-outcomes]');
       const techListEl = overlay.querySelector('[data-gallery-tech]');
+      const roleWrapper = overlay.querySelector('[data-gallery-role]');
+      const roleText = overlay.querySelector('[data-gallery-role-text]');
+      const timelineWrapper = overlay.querySelector('[data-gallery-timeline]');
+      const timelineText = overlay.querySelector('[data-gallery-timeline-text]');
+      const imageNameEl = overlay.querySelector('[data-gallery-image-name]');
+      const imageContextEl = overlay.querySelector('[data-gallery-image-context]');
       const thumbsEl = overlay.querySelector('[data-gallery-thumbs]');
+      const zoomInButton = overlay.querySelector('[data-gallery-zoom-in]');
+      const zoomOutButton = overlay.querySelector('[data-gallery-zoom-out]');
+      const zoomResetButton = overlay.querySelector('[data-gallery-zoom-reset]');
+      const toolkitEl = overlay.querySelector('[data-gallery-toolkit]');
+      const copyButtons = root.querySelectorAll('[data-gallery-copy]');
 
       if (
         !(imageEl instanceof HTMLImageElement) ||
         !(titleEl instanceof HTMLElement) ||
         !(descriptionEl instanceof HTMLElement) ||
+        !(investmentEl instanceof HTMLElement) ||
+        !(impactEl instanceof HTMLElement) ||
+        !(advantageEl instanceof HTMLElement) ||
+        !(imageWrapper instanceof HTMLElement) ||
         !(techListEl instanceof HTMLElement) ||
-        !(thumbsEl instanceof HTMLElement)
+        !(thumbsEl instanceof HTMLElement) ||
+        !(zoomInButton instanceof HTMLButtonElement) ||
+        !(zoomOutButton instanceof HTMLButtonElement) ||
+        !(zoomResetButton instanceof HTMLButtonElement) ||
+        !(toolkitEl instanceof HTMLElement) ||
+        !(imageNameEl instanceof HTMLElement) ||
+        !(imageContextEl instanceof HTMLElement)
       ) {
         return;
       }
 
+      imageEl.setAttribute('draggable', 'false');
+      imageEl.style.transformOrigin = 'center center';
+
       let currentProjectIndex = null;
       let currentSlideIndex = 0;
+      const minZoom = 1;
+      const maxZoom = 4;
+      const zoomStep = 0.25;
+      let currentZoom = minZoom;
+      let translateX = 0;
+      let translateY = 0;
+      let isPanning = false;
+      let panPointerId = null;
+      let panStartX = 0;
+      let panStartY = 0;
+      let startTranslateX = 0;
+      let startTranslateY = 0;
+
+      const applyImageTransform = () => {
+        imageEl.style.transform = `translate(${translateX}px, ${translateY}px) scale(${currentZoom})`;
+        if (currentZoom > minZoom) {
+          imageWrapper.classList.add('is-zoomed');
+        } else {
+          imageWrapper.classList.remove('is-zoomed');
+        }
+      };
+
+      const updateToolkitState = () => {
+        zoomOutButton.disabled = currentZoom <= minZoom + 0.001;
+        zoomInButton.disabled = currentZoom >= maxZoom - 0.001;
+        zoomResetButton.disabled = currentZoom === minZoom;
+        if (currentZoom === minZoom) {
+          zoomResetButton.textContent = 'Fit';
+          zoomResetButton.dataset.state = 'fit';
+          zoomResetButton.setAttribute('aria-label', 'Reset zoom to fit');
+        } else {
+          const percent = Math.round(currentZoom * 100);
+          zoomResetButton.textContent = `${percent}%`;
+          zoomResetButton.dataset.state = 'percent';
+          zoomResetButton.setAttribute('aria-label', `Reset zoom to fit (currently ${percent}%)`);
+        }
+      };
+
+      const resetZoomState = () => {
+        currentZoom = minZoom;
+        translateX = 0;
+        translateY = 0;
+        isPanning = false;
+        panPointerId = null;
+        imageWrapper.classList.remove('is-panning');
+        applyImageTransform();
+        updateToolkitState();
+      };
+
+      const setZoom = (nextZoom) => {
+        const clampedZoom = Math.min(maxZoom, Math.max(minZoom, nextZoom));
+        if (clampedZoom === currentZoom) {
+          return;
+        }
+
+        if (currentZoom === minZoom) {
+          translateX = 0;
+          translateY = 0;
+        } else {
+          const zoomRatio = clampedZoom / currentZoom;
+          translateX *= zoomRatio;
+          translateY *= zoomRatio;
+        }
+
+        currentZoom = clampedZoom;
+        if (currentZoom === minZoom) {
+          translateX = 0;
+          translateY = 0;
+        }
+        applyImageTransform();
+        updateToolkitState();
+      };
+
+      const handlePanStart = (event) => {
+        const target = event.target;
+        if (
+          event.button !== 0 ||
+          currentZoom <= minZoom ||
+          (target instanceof HTMLElement && (toolkitEl.contains(target) || target.closest('.lightbox-nav')))
+        ) {
+          return;
+        }
+        isPanning = true;
+        panPointerId = event.pointerId;
+        panStartX = event.clientX;
+        panStartY = event.clientY;
+        startTranslateX = translateX;
+        startTranslateY = translateY;
+        event.preventDefault();
+        imageWrapper.classList.add('is-panning');
+        imageWrapper.setPointerCapture?.(event.pointerId);
+      };
+
+      const handlePanMove = (event) => {
+        if (!isPanning || event.pointerId !== panPointerId) {
+          return;
+        }
+        translateX = startTranslateX + (event.clientX - panStartX);
+        translateY = startTranslateY + (event.clientY - panStartY);
+        applyImageTransform();
+      };
+
+      const endPan = (event) => {
+        if (!isPanning || (event.pointerId !== panPointerId && event.type !== 'pointerleave')) {
+          return;
+        }
+        isPanning = false;
+        panPointerId = null;
+        imageWrapper.classList.remove('is-panning');
+        try {
+          imageWrapper.releasePointerCapture?.(event.pointerId);
+        } catch (_) {
+          // ignore if pointer was not captured
+        }
+      };
+
+      resetZoomState();
 
       const ensureSlides = (project) => {
-        const slides = Array.isArray(project.images) && project.images.length > 0 ? project.images : [];
-        if (slides.length > 0) {
-          return slides;
+        const createFallbackSlide = (src) => {
+          if (!src) {
+            return null;
+          }
+          const title = typeof project?.title === 'string' && project.title.trim().length > 0 ? project.title : 'Project';
+          const description =
+            typeof project?.description === 'string' && project.description.trim().length > 0
+              ? project.description
+              : '';
+          return {
+            name: `${title} visual`,
+            src,
+            alt: `${title} visual`,
+            context: description,
+          };
+        };
+
+        if (Array.isArray(project.images) && project.images.length > 0) {
+          const mapped = project.images
+            .map((image, index) => {
+              if (typeof image === 'string') {
+                const fallback = createFallbackSlide(image);
+                if (fallback) {
+                  fallback.name = `${fallback.name} ${index + 1}`;
+                  fallback.alt = `${fallback.alt} ${index + 1}`;
+                }
+                return fallback;
+              }
+              if (image && typeof image === 'object' && typeof image.src === 'string') {
+                const baseName =
+                  typeof image.name === 'string' && image.name.trim().length > 0
+                    ? image.name
+                    : `${project.title ?? 'Project'} visual ${index + 1}`;
+                const baseAlt =
+                  typeof image.alt === 'string' && image.alt.trim().length > 0 ? image.alt : `${baseName}`;
+                const baseContext =
+                  typeof image.context === 'string' && image.context.trim().length > 0
+                    ? image.context
+                    : typeof project.description === 'string'
+                      ? project.description
+                      : '';
+                return {
+                  name: baseName,
+                  src: image.src.trim(),
+                  alt: baseAlt,
+                  context: baseContext,
+                };
+              }
+              return null;
+            })
+            .filter((image) => image && image.src);
+          if (mapped.length > 0) {
+            return mapped;
+          }
         }
-        if (project.coverImage) {
-          return [project.coverImage];
+
+        if (typeof project.coverImage === 'string' && project.coverImage.trim().length > 0) {
+          const fallback = createFallbackSlide(project.coverImage.trim());
+          if (fallback) {
+            return [fallback];
+          }
         }
+
         return [];
       };
 
@@ -266,10 +747,167 @@ const galleryDataElementId = `${galleryContextId}-data`;
           currentSlideIndex = slides.length - 1;
         }
 
-        imageEl.src = slides[currentSlideIndex];
-        imageEl.alt = `${project.title} screenshot ${currentSlideIndex + 1}`;
+        resetZoomState();
+
+        const currentSlide = slides[currentSlideIndex];
+        if (!currentSlide) {
+          closeProject();
+          return;
+        }
+
+        imageEl.src = currentSlide.src;
+        imageEl.alt =
+          (typeof currentSlide.alt === 'string' && currentSlide.alt.trim().length > 0
+            ? currentSlide.alt
+            : `${project.title ?? 'Project'} visual ${currentSlideIndex + 1}`);
+
+        if (imageNameEl instanceof HTMLElement) {
+          if (currentSlide.name && currentSlide.name.trim().length > 0) {
+            imageNameEl.textContent = currentSlide.name;
+            imageNameEl.removeAttribute('hidden');
+          } else {
+            imageNameEl.textContent = '';
+            imageNameEl.setAttribute('hidden', 'true');
+          }
+        }
+
+        if (imageContextEl instanceof HTMLElement) {
+          if (currentSlide.context && currentSlide.context.trim().length > 0) {
+            imageContextEl.textContent = currentSlide.context;
+            imageContextEl.removeAttribute('hidden');
+          } else {
+            imageContextEl.textContent = '';
+            imageContextEl.setAttribute('hidden', 'true');
+          }
+        }
+
         titleEl.textContent = project.title ?? '';
         descriptionEl.textContent = project.description ?? '';
+
+        const assignMetaBlock = (element, label, value) => {
+          if (!(element instanceof HTMLElement)) {
+            return;
+          }
+          if (value) {
+            element.removeAttribute('hidden');
+            element.style.display = '';
+            element.innerHTML = '';
+            const labelEl = document.createElement('span');
+            labelEl.textContent = `${label}:`;
+            const valueEl = document.createElement('p');
+            valueEl.textContent = value;
+            element.appendChild(labelEl);
+            element.appendChild(valueEl);
+          } else {
+            element.setAttribute('hidden', 'true');
+            element.style.display = 'none';
+            element.innerHTML = '';
+          }
+        };
+
+        assignMetaBlock(investmentEl, 'Investment', project.investment);
+        assignMetaBlock(impactEl, 'Impact', project.impact);
+        assignMetaBlock(advantageEl, 'Advantage', project.advantage);
+
+        if (
+          infrastructureWrapper instanceof HTMLElement &&
+          infrastructureText instanceof HTMLElement &&
+          Array.isArray(project.infrastructure) &&
+          project.infrastructure.length > 0
+        ) {
+          infrastructureWrapper.removeAttribute('hidden');
+          infrastructureWrapper.style.display = '';
+          infrastructureText.textContent = project.infrastructure.join(', ');
+        } else if (infrastructureWrapper instanceof HTMLElement) {
+          infrastructureWrapper.setAttribute('hidden', 'true');
+          infrastructureWrapper.style.display = 'none';
+          if (infrastructureText instanceof HTMLElement) {
+            infrastructureText.textContent = '';
+          }
+        }
+
+        if (trainingWrapper instanceof HTMLElement && trainingText instanceof HTMLElement && project.training) {
+          const trainings = Array.isArray(project.training) ? project.training : [project.training];
+          trainingWrapper.removeAttribute('hidden');
+          trainingWrapper.style.display = '';
+          trainingText.textContent = trainings.join(', ');
+        } else if (trainingWrapper instanceof HTMLElement) {
+          trainingWrapper.setAttribute('hidden', 'true');
+          trainingWrapper.style.display = 'none';
+          if (trainingText instanceof HTMLElement) {
+            trainingText.textContent = '';
+          }
+        }
+
+        if (
+          storyGrid instanceof HTMLElement &&
+          problemEl instanceof HTMLElement &&
+          issuesList instanceof HTMLElement &&
+          solutionEl instanceof HTMLElement &&
+          outcomesList instanceof HTMLElement
+        ) {
+          const hasStory =
+            project.problem ||
+            (Array.isArray(project.issues) && project.issues.length > 0) ||
+            project.solution ||
+            (Array.isArray(project.outcomes) && project.outcomes.length > 0);
+
+          if (hasStory) {
+            storyGrid.removeAttribute('hidden');
+            storyGrid.style.display = '';
+            problemEl.textContent = project.problem ?? '';
+            solutionEl.textContent = project.solution ?? '';
+
+            issuesList.innerHTML = '';
+            if (Array.isArray(project.issues)) {
+              project.issues.forEach((item) => {
+                const li = document.createElement('li');
+                li.textContent = item;
+                issuesList.appendChild(li);
+              });
+            }
+
+            outcomesList.innerHTML = '';
+            if (Array.isArray(project.outcomes)) {
+              project.outcomes.forEach((item) => {
+                const li = document.createElement('li');
+                li.textContent = item;
+                outcomesList.appendChild(li);
+              });
+            }
+          } else {
+            storyGrid.setAttribute('hidden', 'true');
+            storyGrid.style.display = 'none';
+            problemEl.textContent = '';
+            solutionEl.textContent = '';
+            issuesList.innerHTML = '';
+            outcomesList.innerHTML = '';
+          }
+        }
+
+        if (roleWrapper instanceof HTMLElement && roleText instanceof HTMLElement) {
+          if (project.role) {
+            roleWrapper.removeAttribute('hidden');
+            roleWrapper.style.display = '';
+            roleText.textContent = project.role;
+          } else {
+            roleWrapper.setAttribute('hidden', 'true');
+            roleWrapper.style.display = 'none';
+            roleText.textContent = '';
+          }
+        }
+
+        if (timelineWrapper instanceof HTMLElement && timelineText instanceof HTMLElement) {
+          if (project.timeline) {
+            timelineWrapper.removeAttribute('hidden');
+            timelineWrapper.style.display = '';
+            timelineText.textContent = project.timeline;
+          } else {
+            timelineWrapper.setAttribute('hidden', 'true');
+            timelineWrapper.style.display = 'none';
+            timelineText.textContent = '';
+          }
+        }
 
         techListEl.innerHTML = '';
         if (Array.isArray(project.tech)) {
@@ -281,12 +919,26 @@ const galleryDataElementId = `${galleryContextId}-data`;
         }
 
         thumbsEl.innerHTML = '';
-        slides.forEach((slideSrc, index) => {
+        slides.forEach((slide, index) => {
           const thumbButton = document.createElement('button');
           thumbButton.type = 'button';
           thumbButton.className = `lightbox-thumb${index === currentSlideIndex ? ' lightbox-thumb--active' : ''}`;
           thumbButton.setAttribute('data-gallery-slide', String(index));
-          thumbButton.innerHTML = `<img src="${slideSrc}" alt="${project.title} thumbnail ${index + 1}" />`;
+          const thumbImg = document.createElement('img');
+          thumbImg.src = slide.src;
+          thumbImg.alt =
+            (typeof slide.alt === 'string' && slide.alt.trim().length > 0
+              ? slide.alt
+              : `${project.title ?? 'Project'} thumbnail ${index + 1}`);
+          thumbButton.appendChild(thumbImg);
+
+          if (slide.name && slide.name.trim().length > 0) {
+            const thumbLabel = document.createElement('span');
+            thumbLabel.className = 'lightbox-thumb__label';
+            thumbLabel.textContent = slide.name;
+            thumbButton.appendChild(thumbLabel);
+          }
+
           thumbButton.addEventListener('click', () => {
             currentSlideIndex = index;
             renderLightbox();
@@ -305,6 +957,11 @@ const galleryDataElementId = `${galleryContextId}-data`;
         currentSlideIndex = slideIndex;
 
         renderLightbox();
+        if (project?.slug) {
+          setActiveHash(project.slug);
+        } else {
+          activeSlug = null;
+        }
         overlay.classList.add('is-open');
         overlay.setAttribute('aria-hidden', 'false');
         document.body.classList.add('gallery-lock');
@@ -314,13 +971,58 @@ const galleryDataElementId = `${galleryContextId}-data`;
         }
       };
 
-      const closeProject = () => {
+      const closeProject = (options = {}) => {
         overlay.classList.remove('is-open');
         overlay.setAttribute('aria-hidden', 'true');
         document.body.classList.remove('gallery-lock');
+        resetZoomState();
         currentProjectIndex = null;
         currentSlideIndex = 0;
         window.removeEventListener('keydown', handleKeydown);
+        if (options.restoreHash !== false && activeSlug) {
+          restoreBaseHash();
+        } else if (options.restoreHash === false) {
+          activeSlug = null;
+        }
+      };
+
+      const openProjectBySlug = (slug, slideIndex = 0) => {
+        const normalized = normalizeSlugValue(slug);
+        if (!normalized) {
+          return false;
+        }
+        const projectIndex = slugIndexMap.get(normalized);
+        if (typeof projectIndex !== 'number') {
+          return false;
+        }
+        openProject(projectIndex, slideIndex);
+        return true;
+      };
+
+      const handleHashChange = (event) => {
+        if (suppressHashHandling) {
+          return;
+        }
+        let newHash = window.location.hash;
+        if (event?.newURL) {
+          try {
+            newHash = new URL(event.newURL, window.location.origin).hash;
+          } catch (_) {
+            // ignore parsing errors, fall back to current hash
+          }
+        }
+        const normalized = normalizeSlugValue(newHash);
+        if (normalized) {
+          if (!openProjectBySlug(normalized)) {
+            if (currentProjectIndex !== null) {
+              closeProject({ restoreHash: false });
+            }
+          }
+          return;
+        }
+        if (currentProjectIndex !== null) {
+          closeProject({ restoreHash: false });
+        }
       };
 
       const showNext = () => {
@@ -441,13 +1143,135 @@ const galleryDataElementId = `${galleryContextId}-data`;
         });
       }
 
+      zoomInButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        setZoom(currentZoom + zoomStep);
+      });
+
+      zoomOutButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        setZoom(currentZoom - zoomStep);
+      });
+
+      zoomResetButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        resetZoomState();
+      });
+
+      imageWrapper.addEventListener('pointerdown', handlePanStart);
+      imageWrapper.addEventListener('pointermove', handlePanMove);
+      imageWrapper.addEventListener('pointerup', endPan);
+      imageWrapper.addEventListener('pointerleave', endPan);
+      imageWrapper.addEventListener('pointercancel', endPan);
+      imageWrapper.addEventListener('dblclick', (event) => {
+        event.preventDefault();
+        if (currentZoom === minZoom) {
+          setZoom(Math.min(maxZoom, minZoom + 1));
+        } else {
+          resetZoomState();
+        }
+      });
+
+      window.addEventListener('hashchange', handleHashChange);
+
+      const initialSlug = normalizeSlugValue(window.location.hash);
+      if (initialSlug) {
+        openProjectBySlug(initialSlug);
+      }
+
+      const copyTimeoutMap = new WeakMap();
+      const getShareUrl = (slug) =>
+        `${window.location.origin}${window.location.pathname}${window.location.search}#${slug}`;
+
+      const markCopied = (button, success) => {
+        if (!(button instanceof HTMLButtonElement)) {
+          return;
+        }
+        button.classList.remove('is-copied', 'is-error');
+        const statusLabel = button.querySelector('.gallery-copy-link__status');
+        if (statusLabel instanceof HTMLElement) {
+          statusLabel.textContent = success ? 'Copied' : 'Error';
+        }
+        button.classList.add(success ? 'is-copied' : 'is-error');
+        const previousTimeout = copyTimeoutMap.get(button);
+        if (typeof previousTimeout === 'number') {
+          clearTimeout(previousTimeout);
+        }
+        const timeoutId = window.setTimeout(() => {
+          button.classList.remove('is-copied', 'is-error');
+          if (statusLabel instanceof HTMLElement) {
+            statusLabel.textContent = 'Copied';
+          }
+          copyTimeoutMap.delete(button);
+        }, 2000);
+        copyTimeoutMap.set(button, timeoutId);
+      };
+
+      const copyToClipboard = async (text) => {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+        const tempInput = document.createElement('textarea');
+        tempInput.value = text;
+        tempInput.setAttribute('readonly', '');
+        tempInput.style.position = 'absolute';
+        tempInput.style.left = '-9999px';
+        document.body.appendChild(tempInput);
+        const selection = document.getSelection();
+        const selectedRange =
+          selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
+        tempInput.select();
+        try {
+          const success = document.execCommand('copy');
+          return success;
+        } finally {
+          document.body.removeChild(tempInput);
+          if (selectedRange && selection) {
+            selection.removeAllRanges();
+            selection.addRange(selectedRange);
+          }
+        }
+      };
+
+      copyButtons.forEach((button) => {
+        if (!(button instanceof HTMLButtonElement)) {
+          return;
+        }
+        button.addEventListener('click', async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const slug = button.getAttribute('data-gallery-slug');
+          if (!slug) {
+            markCopied(button, false);
+            return;
+          }
+          const shareUrl = getShareUrl(slug);
+          try {
+            const result = await copyToClipboard(shareUrl);
+            markCopied(button, result !== false);
+          } catch (_) {
+            markCopied(button, false);
+          }
+        });
+      });
+
       root.dataset.galleryReady = 'true';
     };
 
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initializeGallery, { once: true });
-    } else {
+    const initializeWhenReady = () => {
       initializeGallery();
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initializeWhenReady, { once: true });
+    } else {
+      initializeWhenReady();
+    }
+
+    if (!document.__galleryAfterSwap__) {
+      document.addEventListener('astro:after-swap', initializeWhenReady);
+      document.__galleryAfterSwap__ = true;
     }
         </script>
       </section>
@@ -469,6 +1293,20 @@ const galleryDataElementId = `${galleryContextId}-data`;
     --gallery-lightbox-arrow-hover: rgba(37, 99, 235, 0.9);
     --gallery-lightbox-thumb-outline: rgba(37, 99, 235, 0.85);
     --gallery-lightbox-thumb-shadow: rgba(15, 23, 42, 0.12);
+    --gallery-lightbox-toolkit-surface: linear-gradient(
+      135deg,
+      rgba(248, 250, 252, 0.82) 0%,
+      rgba(226, 232, 240, 0.88) 100%
+    );
+    --gallery-lightbox-toolkit-border: rgba(148, 163, 255, 0.42);
+    --gallery-lightbox-toolkit-button-surface: rgba(255, 255, 255, 0.35);
+    --gallery-lightbox-toolkit-button-border: rgba(148, 163, 255, 0.35);
+    --gallery-lightbox-toolkit-button-hover: rgba(37, 99, 235, 0.18);
+    --gallery-lightbox-toolkit-text: rgba(15, 23, 42, 0.88);
+    --gallery-lightbox-toolkit-icon: rgba(30, 64, 175, 0.82);
+    --gallery-lightbox-toolkit-label: rgba(30, 41, 59, 0.8);
+    --gallery-lightbox-toolkit-focus: rgba(148, 163, 255, 0.62);
+    --gallery-lightbox-toolkit-shadow: rgba(15, 23, 42, 0.18);
   }
 
   .dark {
@@ -486,18 +1324,130 @@ const galleryDataElementId = `${galleryContextId}-data`;
     --gallery-lightbox-arrow-hover: rgba(129, 140, 248, 0.9);
     --gallery-lightbox-thumb-outline: rgba(129, 140, 248, 0.9);
     --gallery-lightbox-thumb-shadow: rgba(15, 23, 42, 0.35);
+    --gallery-lightbox-toolkit-surface: linear-gradient(
+      135deg,
+      rgba(28, 37, 65, 0.82) 0%,
+      rgba(18, 29, 54, 0.88) 100%
+    );
+    --gallery-lightbox-toolkit-border: rgba(99, 102, 241, 0.6);
+    --gallery-lightbox-toolkit-button-surface: rgba(30, 41, 59, 0.7);
+    --gallery-lightbox-toolkit-button-border: rgba(99, 102, 241, 0.62);
+    --gallery-lightbox-toolkit-button-hover: rgba(129, 140, 248, 0.22);
+    --gallery-lightbox-toolkit-text: rgba(226, 232, 240, 0.9);
+    --gallery-lightbox-toolkit-icon: rgba(191, 219, 254, 0.92);
+    --gallery-lightbox-toolkit-label: rgba(226, 232, 240, 0.94);
+    --gallery-lightbox-toolkit-focus: rgba(129, 140, 248, 0.68);
+    --gallery-lightbox-toolkit-shadow: rgba(15, 23, 42, 0.55);
+  }
+
+  .flex-flow-wrap {
+    flex-flow: row wrap;
+  }
+
+  .gallery-copy-link {
+    position: absolute;
+    top: 1.1rem;
+    right: 1.1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(255, 255, 255, 0.92);
+    color: rgba(15, 23, 42, 0.7);
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, color 0.18s ease, border 0.18s ease;
+    cursor: pointer;
+    z-index: 3;
+  }
+
+  .dark .gallery-copy-link {
+    border-color: rgba(148, 163, 184, 0.2);
+    background: rgba(30, 41, 59, 0.92);
+    color: rgba(226, 232, 240, 0.9);
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.45);
+  }
+
+  .gallery-copy-link:hover,
+  .gallery-copy-link:focus-visible {
+    transform: translateY(-2px);
+    box-shadow: 0 20px 40px rgba(37, 99, 235, 0.22);
+    color: rgba(37, 99, 235, 0.95);
+    border-color: rgba(37, 99, 235, 0.35);
+  }
+
+  .dark .gallery-copy-link:hover,
+  .dark .gallery-copy-link:focus-visible {
+    box-shadow: 0 20px 40px rgba(37, 99, 235, 0.32);
+    color: rgba(191, 219, 254, 1);
+    border-color: rgba(129, 140, 248, 0.45);
+  }
+
+  .gallery-copy-link svg {
+    width: 1.15rem;
+    height: 1.15rem;
+    fill: currentColor;
+  }
+
+  .gallery-copy-link__status {
+    position: absolute;
+    bottom: -0.5rem;
+    right: -0.5rem;
+    transform: translate(20%, 20%) scale(0.8);
+    transform-origin: bottom right;
+    padding: 0.25rem 0.45rem;
+    border-radius: 999px;
+    background: rgba(37, 99, 235, 0.95);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    box-shadow: 0 12px 32px rgba(37, 99, 235, 0.28);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+  }
+
+  .gallery-copy-link.is-copied .gallery-copy-link__status {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+
+  .gallery-copy-link.is-error .gallery-copy-link__status {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+    background: rgba(239, 68, 68, 0.95);
+    box-shadow: 0 12px 32px rgba(239, 68, 68, 0.28);
+  }
+
+  .gallery-copy-link.is-copied {
+    color: rgba(37, 99, 235, 0.95);
+  }
+
+  .gallery-copy-link.is-error {
+    color: rgba(239, 68, 68, 0.95);
   }
 
   .lightbox {
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100vw;
     background: var(--gallery-lightbox-overlay);
     display: none;
     align-items: center;
     justify-content: center;
-    padding: 2rem;
+    padding: clamp(1.5rem, 4vw, 3rem);
     backdrop-filter: blur(12px);
     z-index: 999;
+    min-height: 100vh;
+    height: 100dvh;
+    margin: 0;
   }
 
   .lightbox.is-open {
@@ -506,42 +1456,198 @@ const galleryDataElementId = `${galleryContextId}-data`;
 
   .lightbox-content {
     position: relative;
-    max-width: 960px;
-    width: min(90vw, 960px);
-    max-height: 88vh;
     border-radius: 1.5rem;
+    max-height: calc(100vh - (clamp(1.5rem, 4vw, 3rem) * 2));
     background: var(--gallery-lightbox-surface);
-    box-shadow: 0 24px 80px rgba(15, 23, 42, 0.15);
+    box-shadow: 0 38px 110px rgba(15, 23, 42, 0.28);
+    border: 1px solid var(--gallery-lightbox-border);
     display: flex;
     flex-direction: column;
+    padding: 1rem;
     overflow: hidden;
-    border: 1px solid var(--gallery-lightbox-border);
+    gap: 1rem;
   }
 
   .lightbox-close {
     position: absolute;
-    top: 1rem;
-    right: 1rem;
+    top: clamp(0.9rem, 1.5vw, 1.3rem);
+    right: clamp(0.9rem, 1.5vw, 1.3rem);
     border: none;
     background: var(--gallery-lightbox-arrow);
     color: var(--gallery-lightbox-text);
-    font-size: 2rem;
+    font-size: 1.75rem;
     line-height: 1;
-    width: 2.5rem;
-    height: 2.5rem;
+    width: 2.4rem;
+    height: 2.4rem;
     border-radius: 50%;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.2s ease, transform 0.2s ease, color 0.2s ease;
+    transition: background 0.2s ease, transform 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+    backdrop-filter: blur(6px);
   }
 
   .lightbox-close:hover,
   .lightbox-close:focus-visible {
     background: var(--gallery-lightbox-arrow-hover);
     color: #ffffff;
-    transform: scale(1.04);
+    transform: translateY(-1px);
+    box-shadow: 0 12px 30px rgba(37, 99, 235, 0.28);
+  }
+
+  .lightbox-layout {
+    margin: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+    gap: 1rem;
+    align-items: stretch;
+    height: 100%;
+    width: 100%;
+    min-height: 0;
+  }
+
+  .lightbox-media {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(1rem, 1.8vw, 1.4rem);
+    min-height: 0;
+  }
+
+  .lightbox-image {
+    position: relative;
+    flex: 1 1 auto;
+    border-radius: 1.6rem;
+    overflow: hidden;
+    background: rgba(2, 6, 23, 0.82);
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 255, 0.08);
+    touch-action: none;
+  }
+
+  .lightbox-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    transition: transform 0.18s ease-out;
+    user-select: none;
+  }
+
+  .lightbox-image.is-zoomed {
+    cursor: grab;
+  }
+
+  .lightbox-image.is-zoomed img {
+    cursor: inherit;
+  }
+
+  .lightbox-image.is-panning,
+  .lightbox-image.is-panning img {
+    cursor: grabbing;
+  }
+
+  .lightbox-image-caption {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    background: var(--gallery-lightbox-surface-secondary);
+    border: 1px solid rgba(148, 163, 255, 0.16);
+    border-radius: 1.1rem;
+    padding: 0.9rem 1.1rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  .lightbox-image-caption__name {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: rgba(99, 102, 241, 0.9);
+  }
+
+  .lightbox-image-caption__context {
+    margin: 0;
+    font-size: 0.92rem;
+    line-height: 1.55;
+    color: var(--gallery-lightbox-meta);
+  }
+
+  .lightbox-toolkit {
+    position: absolute;
+    right: clamp(0.75rem, 1.8vw, 1.25rem);
+    bottom: clamp(0.75rem, 1.8vw, 1.25rem);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--gallery-lightbox-toolkit-surface);
+    color: var(--gallery-lightbox-toolkit-text);
+    padding: 0.4rem 0.5rem;
+    border-radius: 999px;
+    box-shadow: 0 18px 38px var(--gallery-lightbox-toolkit-shadow);
+    border: 1px solid var(--gallery-lightbox-toolkit-border);
+    z-index: 2;
+    backdrop-filter: blur(10px);
+  }
+
+  .lightbox-toolkit__button {
+    border: none;
+    background: var(--gallery-lightbox-toolkit-button-surface);
+    color: var(--gallery-lightbox-toolkit-icon);
+    width: 2.2rem;
+    height: 2.2rem;
+    border-radius: 999px;
+    border: 1px solid var(--gallery-lightbox-toolkit-button-border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .lightbox-toolkit__button--fit {
+    flex: 0 0 3.25rem;
+    justify-content: center;
+    padding: 0;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--gallery-lightbox-toolkit-label);
+    text-align: center;
+  }
+
+  .lightbox-toolkit__button--fit[data-state='fit'] {
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--gallery-lightbox-toolkit-label);
+  }
+
+  .lightbox-toolkit__button--fit[data-state='percent'] {
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .lightbox-toolkit__button:hover,
+  .lightbox-toolkit__button:focus-visible {
+    background: var(--gallery-lightbox-toolkit-button-hover);
+    color: var(--gallery-lightbox-text);
+    border-color: transparent;
+    transform: translateY(-1px);
+    box-shadow: 0 12px 24px rgba(37, 99, 235, 0.35);
+  }
+
+  .lightbox-toolkit__button:focus-visible {
+    outline: 2px solid var(--gallery-lightbox-toolkit-focus);
+    outline-offset: 2px;
+  }
+
+  .lightbox-toolkit__button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
   }
 
   .lightbox-nav {
@@ -551,31 +1657,32 @@ const galleryDataElementId = `${galleryContextId}-data`;
     align-items: center;
     justify-content: space-between;
     pointer-events: none;
+    padding: 0 clamp(0.75rem, 1.8vw, 1.5rem);
   }
 
   .lightbox-arrow {
     pointer-events: all;
-    margin: 0 1.25rem;
     border: none;
-    width: 3rem;
-    height: 3rem;
+    width: clamp(2.5rem, 4vw, 3rem);
+    height: clamp(2.5rem, 4vw, 3rem);
     border-radius: 50%;
     background: var(--gallery-lightbox-arrow);
     color: var(--gallery-lightbox-text);
-    font-size: 2.25rem;
+    font-size: clamp(1.6rem, 2.6vw, 2.1rem);
     line-height: 1;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+    backdrop-filter: blur(6px);
   }
 
   .lightbox-arrow:hover,
   .lightbox-arrow:focus-visible {
     background: var(--gallery-lightbox-arrow-hover);
-    transform: scale(1.05);
-    box-shadow: 0 12px 32px rgba(37, 99, 235, 0.3);
+    transform: translateY(-1px) scale(1.04);
+    box-shadow: 0 18px 40px rgba(37, 99, 235, 0.32);
     color: #ffffff;
   }
 
@@ -584,58 +1691,27 @@ const galleryDataElementId = `${galleryContextId}-data`;
     outline-offset: 3px;
   }
 
-  .lightbox-layout {
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    height: 100%;
-    width: 100%;
-  }
-
-  .lightbox-media {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    flex: 2;
-    min-height: 0;
-  }
-
-  .lightbox-image {
-    flex: 1;
-    border-radius: 1.25rem;
-    overflow: hidden;
-    background: rgba(2, 6, 23, 0.75);
-  }
-
-  .lightbox-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-
   .lightbox-thumbs {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-    gap: 0.75rem;
-  }
-
-  .lightbox-media .lightbox-thumbs {
-    margin-top: 0.25rem;
+    grid-template-columns: repeat(auto-fit, minmax(94px, 1fr));
+    gap: 0.85rem;
   }
 
   .lightbox-details {
-    flex: 1;
-    padding: 2rem;
     background: var(--gallery-lightbox-surface-secondary);
     color: var(--gallery-lightbox-text);
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 1.15rem;
+    padding: clamp(1.5rem, 2.1vw, 2.05rem);
+    border-radius: 1.55rem;
+    border: 1px solid rgba(148, 163, 255, 0.16);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    min-width: 0;
+    max-height: 100%;
     overflow-y: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
-    border-radius: 1.25rem;
   }
 
   .lightbox-details::-webkit-scrollbar {
@@ -658,7 +1734,7 @@ const galleryDataElementId = `${galleryContextId}-data`;
   }
 
   .lightbox-text h3 {
-    font-size: 1.5rem;
+    font-size: clamp(1.4rem, 2.2vw, 1.65rem);
     font-weight: 600;
   }
 
@@ -676,12 +1752,19 @@ const galleryDataElementId = `${galleryContextId}-data`;
     color: var(--gallery-lightbox-meta);
   }
 
+  .lightbox-meta--stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
   .lightbox-meta span {
     font-weight: 600;
   }
 
   .lightbox-meta ul {
     display: flex;
+    flex-flow: row wrap;
     gap: 0.5rem;
     margin: 0;
     padding: 0;
@@ -693,6 +1776,85 @@ const galleryDataElementId = `${galleryContextId}-data`;
     border-radius: 999px;
     background: rgba(148, 163, 255, 0.18);
     color: var(--gallery-lightbox-text);
+    text-wrap-mode: nowrap;
+  }
+
+  .lightbox-meta--text {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .lightbox-meta--text p {
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .lightbox-meta-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.75rem 0.9rem;
+    border-radius: 0.9rem;
+    background: rgba(148, 163, 255, 0.12);
+    border: 1px solid rgba(148, 163, 255, 0.16);
+  }
+
+  .lightbox-meta-block span {
+    font-size: 0.85rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(99, 102, 241, 0.8);
+  }
+
+  .lightbox-meta-block p {
+    margin: 0;
+    color: var(--gallery-lightbox-text);
+    font-size: 0.95rem;
+    line-height: 1.45;
+  }
+
+  .lightbox-story-grid {
+    display: grid;
+    gap: 1rem;
+    border-radius: 1.25rem;
+    border: 1px solid rgba(148, 163, 255, 0.16);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 1.2rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+
+  .lightbox-story-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .lightbox-story-block h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(99, 102, 241, 0.9);
+  }
+
+  .lightbox-story-block p {
+    margin: 0;
+    line-height: 1.55;
+    color: var(--gallery-lightbox-text);
+  }
+
+  .lightbox-story-block ul {
+    margin: 0;
+    padding-left: 1.25rem;
+    display: grid;
+    gap: 0.4rem;
+    list-style: disc;
+  }
+
+  .lightbox-story-block li {
+    line-height: 1.45;
   }
 
   .lightbox-thumb {
@@ -704,14 +1866,35 @@ const galleryDataElementId = `${galleryContextId}-data`;
     position: relative;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     box-shadow: 0 10px 26px var(--gallery-lightbox-thumb-shadow);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .lightbox-thumb img {
     width: 100%;
-    height: 100%;
+    height: auto;
+    flex: 1 1 auto;
     object-fit: cover;
     display: block;
     filter: saturate(0.75);
+  }
+
+  .lightbox-thumb__label {
+    display: block;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--gallery-lightbox-meta);
+    background: rgba(15, 23, 42, 0.04);
+    text-align: center;
+  }
+
+  .dark .lightbox-thumb__label {
+    background: rgba(30, 41, 59, 0.55);
+    color: rgba(226, 232, 240, 0.85);
   }
 
   .lightbox-thumb--active {
@@ -729,23 +1912,33 @@ const galleryDataElementId = `${galleryContextId}-data`;
     box-shadow: 0 10px 26px var(--gallery-lightbox-thumb-shadow);
   }
 
-  body.gallery-lock {
-    overflow: hidden;
+  #astro-dev-toolbar,
+  astro-dev-toolbar {
+    display: none !important;
   }
 
-  @media (min-width: 900px) {
-    .lightbox-layout {
-      flex-direction: row;
-    }
-
-    .lightbox-details {
-      max-width: 28rem;
-    }
+  body.gallery-lock {
+    overflow: hidden;
   }
 
   @media (min-width: 1100px) {
     .project-card--featured {
       grid-column: span 2;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .lightbox-layout {
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+    }
+
+    .lightbox-nav {
+      padding: 0 0.6rem;
+    }
+
+    .lightbox-details {
+      max-height: none;
     }
   }
 
